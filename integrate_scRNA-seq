@@ -1,0 +1,84 @@
+cellranger count --id=CD1 --transcriptome=/picb/bigdata/project/guoxin/refdata-gex-mm10-2020-A/ --fastqs=/picb/bigdata/project/guoxin/sclungSeurat/CD_1/  --localcores=8  --localmem=64 --create-bam=true
+cellranger count --id=HFD1 --transcriptome=/picb/bigdata/project/guoxin/refdata-gex-mm10-2020-A/ --fastqs=/picb/bigdata/project/guoxin/sclungSeurat/HFD_1/  --localcores=8  --localmem=64 --create-bam=true
+cellranger count --id=CD2 --transcriptome=/picb/bigdata/project/guoxin/refdata-gex-mm10-2020-A/ --fastqs=/picb/bigdata/project/guoxin/sclungSeurat/CD_2/  --localcores=8  --localmem=64 --create-bam=true
+cellranger count --id=HFD2 --transcriptome=/picb/bigdata/project/guoxin/refdata-gex-mm10-2020-A/ --fastqs=/picb/bigdata/project/guoxin/sclungSeurat/HFD_2/  --localcores=8  --localmem=64 --create-bam=true
+cellranger count --id=CD3 --transcriptome=/picb/bigdata/project/guoxin/refdata-gex-mm10-2020-A/ --fastqs=/picb/bigdata/project/guoxin/sclungSeurat/CD_3/  --localcores=8  --localmem=64 --create-bam=true 
+cellranger count --id=HFD3 --transcriptome=/picb/bigdata/project/guoxin/refdata-gex-mm10-2020-A/ --fastqs=/picb/bigdata/project/guoxin/sclungSeurat/HFD_3/  --localcores=8  --localmem=64 --create-bam=true
+
+library(Seurat)
+library(dplyr)
+library(patchwork)
+library(ggplot2)
+
+
+###HFD2###
+HFD2_data<-Read10X(data.dir = "/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD2/")
+HFD2<-CreateSeuratObject(counts = HFD2_data, project = "HFD2", assay = "RNA")
+head(HFD2@meta.data)
+HFD2
+HFD2[["percent.mt"]] <- PercentageFeatureSet(HFD2, pattern = "^mt-")
+
+p1 <- VlnPlot(HFD2,features = c("nFeature_RNA","nCount_RNA","percent.mt"),ncol = 3)#violin plot
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD2CONTENT/hdf2violin1.pdf", p1,width = 14, height = 7)
+plot1 <- FeatureScatter(HFD2,feature1 = "nCount_RNA",feature2 = "percent.mt")
+plot2 <- FeatureScatter(HFD2,feature1 = "nCount_RNA",feature2 = "nFeature_RNA")
+p2 <- plot1+plot2
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD2CONTENT/hdf2point.pdf", p2,width = 14, height = 7)
+HFD2 <- subset(HFD2,
+                 subset= nFeature_RNA >200 & nFeature_RNA <60000 & percent.mt <20 )
+HFD2
+# SCT normalization
+HFD2<-SCTransform(HFD2, verbose = FALSE)
+# content of SCT assay
+HFD2[["SCT"]]@counts		# corrected counts
+HFD2[["SCT"]]@data		# log1p(corrected counts)
+HFD2[["SCT"]]@scale.data	# pearson residuals
+HFD2[["SCT"]]@meta.features	# Feature-level meta data (eg. sct mean, variance of each gene)
+HFD2[["SCT"]]@var.features	# Selected variable features (3000 by default)
+
+# Dimensinal reduction
+HFD2_1<-RunPCA(HFD2, verbose = FALSE)
+HFD2_2<-RunUMAP(HFD2_1, dims = 1:30, verbose = FALSE)
+p3 <- DimPlot(HFD2_2,reduction = "umap")
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD2CONTENT/hdf2umap.pdf", p3,width = 7, height = 7)
+# Clustering
+HFD2_2<-FindNeighbors(HFD2_2, dims = 1:30, verbose = FALSE)
+HFD2_2<-FindClusters(HFD2_2, verbose = FALSE,resolution = 0.8)
+head(Idents(HFD2_2))
+HFD2markers <- FindAllMarkers(HFD2_2,only.pos = TRUE) #find markergenes
+All_markers <- HFD2markers %>% group_by(cluster)
+write.table(All_markers[All_markers$p_val_adj <=0.05,],file="/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD2CONTENT/HFD2markergenes.txt",sep="\t",col.names = TRUE,row.names = FALSE,quote = FALSE)
+
+# Plot cluster
+cluster1<-DimPlot(HFD2_2, label = TRUE)
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD2CONTENT/cluster1.pdf", cluster1)
+
+# Plot UMI count and mt gene content across cluster
+HFD2_2[["log_nCount_RNA"]]<-log10(HFD2_2[["nCount_RNA"]])
+qc<-FeaturePlot(HFD2_2, features = c("log_nCount_RNA", "percent.mt"))
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD2CONTENT/qc.pdf", qc, width = 14, height = 7)
+
+# Plot markers
+head(HFD2_2@meta.data)
+my_levels <- c("9","18","3","7","5","12","14","15","0","8","2","17","13","4","16","6","11","19","1","10","22","23","21","20")
+HFD2_2@meta.data$seurat_clusters <- factor(HFD2_2@meta.data$seurat_clusters,levels=my_levels)
+Idents(HFD2_2) <- HFD2_2@meta.data$seurat_clusters
+
+markers<-DotPlot(HFD2_2, features = c(
+ "Cd3d", "Cd3g", "Cd4",  "Cd8b1",	# T cells
+  "Ncr1", 		# NK cells
+  "Ms4a1", 	# B cells
+  "Csf1r", "Plac8",		# Monocytes
+  "C1qa", "Lpl","Itgax",	# Macrophage
+ "Retnlg",	#Neutrophil
+  "Csf3r","Fcgr3", "Xcr1",	"Mgl2",		# DC
+"Ager", "Epcam","Hopx","Sftpc","Areg",                            #epithelial
+"Ptprb","Vwf","Car4","Tmem212", #endothelial
+"Col1a1","Pdgfra","Inmt","Pdgfrb","Col14a1","Mcpt8"#fibroblast
+),) + RotatedAxis()	
+
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD2CONTENT/HFD2markers.pdf", markers,width = 9, height = 7)
+
+# Save integrated data
+save(HFD2_2, file = "HFD2_2.Rdata")
+
