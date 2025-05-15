@@ -82,3 +82,74 @@ ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD2CONTENT/HFD2markers.pdf
 # Save integrated data
 save(HFD2_2, file = "HFD2_2.Rdata")
 
+
+###HFD3###
+HFD3_data<-Read10X(data.dir = "/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD3/")
+HFD3<-CreateSeuratObject(counts = HFD3_data, project = "HFD3", assay = "RNA")
+head(HFD3@meta.data)
+HFD3
+HFD3[["percent.mt"]] <- PercentageFeatureSet(HFD3, pattern = "^mt-")
+
+p1 <- VlnPlot(HFD3,features = c("nFeature_RNA","nCount_RNA","percent.mt"),ncol = 3)#violin plot
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD3CONTENT/hdf3violin.pdf", p1,width = 14, height = 7)
+plot1 <- FeatureScatter(HFD3,feature1 = "nCount_RNA",feature2 = "percent.mt")
+plot2 <- FeatureScatter(HFD3,feature1 = "nCount_RNA",feature2 = "nFeature_RNA")
+p2 <- plot1+plot2
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD3CONTENT/hdf3point.pdf", p2,width = 14, height = 7)
+HFD3 <- subset(HFD3,
+                 subset= nFeature_RNA >200 & nFeature_RNA <60000 & percent.mt <20 )
+HFD3
+# SCT normalization
+HFD3<-SCTransform(HFD3, verbose = FALSE)
+# content of SCT assay
+HFD3[["SCT"]]@counts		# corrected counts
+HFD3[["SCT"]]@data		# log1p(corrected counts)
+HFD3[["SCT"]]@scale.data	# pearson residuals
+HFD3[["SCT"]]@meta.features	# Feature-level meta data (eg. sct mean, variance of each gene)
+HFD3[["SCT"]]@var.features	# Selected variable features (3000 by default)
+
+# Dimensinal reduction
+HFD3_1<-RunPCA(HFD3, verbose = FALSE)
+HFD3_2<-RunUMAP(HFD3_1, dims = 1:30, verbose = FALSE)
+p3 <- DimPlot(HFD3_2,reduction = "umap")
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD3CONTENT/hdf3umap.pdf", p3,width = 7, height = 7)
+# Clustering
+HFD3_2<-FindNeighbors(HFD3_2, dims = 1:30, verbose = FALSE)
+HFD3_2<-FindClusters(HFD3_2, verbose = FALSE,resolution = 0.8)
+head(Idents(HFD3_2))
+HFD3markers <- FindAllMarkers(HFD3_2,only.pos = TRUE) #find markergenes
+All_markers <- HFD3markers %>% group_by(cluster)
+write.table(All_markers[All_markers$p_val_adj <=0.05,],file="/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD3CONTENT/HFD3markergenes.txt",sep="\t",col.names = TRUE,row.names = FALSE,quote = FALSE)
+
+# Plot cluster
+cluster<-DimPlot(HFD3_2, label = TRUE)
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD3CONTENT/cluster.pdf", cluster)
+
+# Plot UMI count and mt gene content across cluster
+HFD3_2[["log_nCount_RNA"]]<-log10(HFD3_2[["nCount_RNA"]])
+qc<-FeaturePlot(HFD3_2, features = c("log_nCount_RNA", "percent.mt"))
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD3CONTENT/qc.pdf", qc, width = 14, height = 7)
+
+# Plot markers
+head(HFD3_2@meta.data)
+my_levels <- c("9","18","19","0","17","2","16","20","15","5","13","12","10","1","8","24","3","11","14","6","4","7","22","21","23")
+HFD3_2@meta.data$seurat_clusters <- factor(HFD3_2@meta.data$seurat_clusters,levels=my_levels)
+Idents(HFD3_2) <- HFD3_2@meta.data$seurat_clusters
+
+markers<-DotPlot(HFD3_2, features = c(
+ "Cd3d", "Cd3g", "Cd4",  "Cd8b1",	# T cells
+  "Ncr1", 		# NK cells
+  "Ms4a1", 	# B cells
+  "Csf1r", "Plac8",		# Monocytes
+  "C1qa", "Lpl","Itgax",	# Macrophage
+ "Retnlg",	#Neutrophil
+  "Csf3r","Fcgr3", "Xcr1",	"Mgl2",		# DC
+"Ager", "Epcam","Hopx","Sftpc","Areg",                            #epithelial
+"Ptprb","Vwf","Car4","Tmem212", #endothelial
+"Col1a1","Pdgfra","Inmt","Pdgfrb","Col14a1","Mcpt8"#fibroblast
+),) + RotatedAxis()	
+
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD3CONTENT/HFD3markers.pdf", markers,width = 9, height = 7)
+
+# Save integrated data
+save(HFD3_2, file = "HFD3_2.Rdata")
