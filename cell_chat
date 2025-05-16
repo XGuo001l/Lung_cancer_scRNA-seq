@@ -1,0 +1,442 @@
+if (!requireNamespace("NMF", quietly = TRUE)) install.packages("NMF")
+if (!requireNamespace("circlize", quietly = TRUE)) install.packages("circlize")
+if (!requireNamespace("ComplexHeatmap", quietly = TRUE)) BiocManager::install("ComplexHeatmap")
+if (!requireNamespace("CellChat", quietly = TRUE)) remotes::install_github("jinworks/CellChat")
+library(patchwork)
+library(NMF)
+library(Seurat)
+library(CellChat)
+load("CDHFD_allDATA1.Rdata")
+cccelltype<-subset(CDHFD_allDATA1, idents = c('1','3','26','35','6','18','19','28','7','12','8','10','0','21','23'))
+cccelltype@meta.data$samples <- cccelltype@meta.data$orig.ident
+
+exp  <- cccelltype@assays$SCT@data
+meta <- cccelltype@meta.data
+dim(exp)
+head(exp)[,1:4]
+
+cellchat1 <- createCellChat(object = exp,
+                           meta = meta,
+                           group.by = "cell_type")
+head(cellchat1@meta)
+cellchat1 <- addMeta(cellchat1, meta = meta)
+cellchat1 <- setIdent(cellchat1, ident.use = "cell_type") 
+levels(cellchat1@idents)
+showDatabaseCategory(CellChatDB.mouse)
+#加载数据库
+CellChatDB <- CellChatDB.mouse
+# 来看一下数据库的结构（option）：
+head(CellChatDB$interaction)
+dplyr::glimpse(CellChatDB$interaction)
+cellchat1@DB <- CellChatDB
+
+#计算通信概率并推断cellchat网络
+#### 3.1 计算细胞通讯概率 --------
+cellchat1 <- subsetData(cellchat1)
+cellchat1 <- identifyOverExpressedGenes(cellchat1,do.fast=FALSE)
+cellchat1 <- identifyOverExpressedInteractions(cellchat1)
+
+#删除不需要的level
+unique(cellchat1@idents)
+cellchat1@idents <- droplevels(cellchat1@idents)
+
+cellchat1 <- computeCommunProb(cellchat1, raw.use = TRUE)
+# 如果某些细胞组中只有少数细胞，则过滤掉细胞间通信
+cellchat1 <- filterCommunication(cellchat1, min.cells = 10)
+#提取配受体对细胞通讯结果表
+df.net <- subsetCommunication(cellchat1)
+
+#### 3.3 提取信号通路水平的细胞通讯表 ---------
+cellchat1 <- computeCommunProbPathway(cellchat1) #计算信号通路水平上的通讯概率
+df.netp <- subsetCommunication(cellchat1, slot.name = 'netP') #得到信号通路水平细胞通讯表
+head(df.netp)
+#计算整合的细胞通信网络
+cellchat1 <- aggregateNet(cellchat1)
+
+# Compute the network centrality scores
+cellchat1 <- netAnalysis_computeCentrality(cellchat1, slot.name = "netP") 
+ save(cellchat1,file="cellchat1.Rdata")
+
+#作图
+
+pdf("./cellchat/networkp3.pdf")
+netVisual_circle(cellchat1@net$count, vertex.weight = groupSize, 
+                 weight.scale = T, label.edge= F, 
+                 title.name = "Number of interactions")
+dev.off()
+netVisual_circle(cellchat1@net$weight, 
+                 vertex.weight = groupSize, 
+                 weight.scale = T, label.edge= F, 
+                 title.name = "Interaction weights/strength")
+
+pdf("networkbubble5.pdf",width=6,height=12)
+netVisual_bubble(cellchat1, 
+                 sources.use =5, 
+                 targets.use = c(1:5), 
+                 remove.isolate = FALSE)
+dev.off()
+
+
+##########差异细胞通讯分析###############
+table(Idents(cccelltype))
+cccelltype_CD<-subset(cccelltype, replicate = "CD")
+Idents(cccelltype) <- cccelltype@meta.data$replicate
+cccelltype_CD<-subset(cccelltype, idents = "CD")
+cccelltype_HFD<-subset(cccelltype, idents = "HFD")
+Idents(cccelltype) <- cccelltype@meta.data$cell_type
+Idents(cccelltype_CD) <- cccelltype_CD@meta.data$cell_type
+Idents(cccelltype_HFD) <- cccelltype_HFD@meta.data$cell_type
+
+
+######CD
+exp  <- cccelltype_CD@assays$SCT@data
+meta <- cccelltype_CD@meta.data
+dim(exp)
+head(exp)[,1:4]
+
+cellchat_CD <- createCellChat(object = exp,
+                           meta = meta,
+                           group.by = "cell_type")
+head(cellchat_CD@meta)
+cellchat_CD <- addMeta(cellchat_CD, meta = meta)
+cellchat_CD <- setIdent(cellchat_CD, ident.use = "cell_type") 
+levels(cellchat_CD@idents)
+showDatabaseCategory(CellChatDB.mouse)
+#加载数据库
+CellChatDB <- CellChatDB.mouse
+# 来看一下数据库的结构（option）：
+head(CellChatDB$interaction)
+dplyr::glimpse(CellChatDB$interaction)
+cellchat_CD@DB <- CellChatDB
+
+#计算通信概率并推断cellchat网络
+#### 3.1 计算细胞通讯概率 --------
+cellchat_CD <- subsetData(cellchat_CD)
+cellchat_CD <- identifyOverExpressedGenes(cellchat_CD,do.fast=FALSE)
+cellchat_CD <- identifyOverExpressedInteractions(cellchat_CD)
+
+#删除不需要的level
+unique(cellchat_CD@idents)
+cellchat_CD@idents <- droplevels(cellchat_CD@idents)
+
+cellchat_CD <- computeCommunProb(cellchat_CD, raw.use = TRUE)
+# 如果某些细胞组中只有少数细胞，则过滤掉细胞间通信
+cellchat_CD <- filterCommunication(cellchat_CD, min.cells = 10)
+#提取配受体对细胞通讯结果表
+df.net <- subsetCommunication(cellchat_CD)
+
+#### 3.3 提取信号通路水平的细胞通讯表 ---------
+cellchat_CD <- computeCommunProbPathway(cellchat_CD) #计算信号通路水平上的通讯概率
+df.netp <- subsetCommunication(cellchat_CD, slot.name = 'netP') #得到信号通路水平细胞通讯表
+head(df.netp)
+#计算整合的细胞通信网络
+cellchat_CD <- aggregateNet(cellchat_CD)
+
+# Compute the network centrality scores
+cellchat_CD <- netAnalysis_computeCentrality(cellchat_CD, slot.name = "netP") 
+ save(cellchat_CD,file="cellchat_CD.Rdata")
+
+
+
+######HFD
+exp  <- cccelltype_HFD@assays$SCT@data
+meta <- cccelltype_HFD@meta.data
+dim(exp)
+head(exp)[,1:4]
+
+cellchat_HFD <- createCellChat(object = exp,
+                           meta = meta,
+                           group.by = "cell_type")
+head(cellchat_HFD@meta)
+cellchat_HFD <- addMeta(cellchat_HFD, meta = meta)
+cellchat_HFD <- setIdent(cellchat_HFD, ident.use = "cell_type") 
+levels(cellchat_HFD@idents)
+showDatabaseCategory(CellChatDB.mouse)
+#加载数据库
+CellChatDB <- CellChatDB.mouse
+# 来看一下数据库的结构（option）：
+head(CellChatDB$interaction)
+dplyr::glimpse(CellChatDB$interaction)
+cellchat_HFD@DB <- CellChatDB
+
+#计算通信概率并推断cellchat网络
+#### 3.1 计算细胞通讯概率 --------
+cellchat_HFD <- subsetData(cellchat_HFD)
+cellchat_HFD <- identifyOverExpressedGenes(cellchat_HFD,do.fast=FALSE)
+cellchat_HFD <- identifyOverExpressedInteractions(cellchat_HFD)
+
+#删除不需要的level
+unique(cellchat_HFD@idents)
+cellchat_HFD@idents <- droplevels(cellchat_HFD@idents)
+
+cellchat_HFD <- computeCommunProb(cellchat_HFD, raw.use = TRUE)
+# 如果某些细胞组中只有少数细胞，则过滤掉细胞间通信
+cellchat_HFD <- filterCommunication(cellchat_HFD, min.cells = 10)
+#提取配受体对细胞通讯结果表
+df.net <- subsetCommunication(cellchat_HFD)
+
+#### 3.3 提取信号通路水平的细胞通讯表 ---------
+cellchat_HFD <- computeCommunProbPathway(cellchat_HFD) #计算信号通路水平上的通讯概率
+df.netp <- subsetCommunication(cellchat_HFD, slot.name = 'netP') #得到信号通路水平细胞通讯表
+head(df.netp)
+#计算整合的细胞通信网络
+cellchat_HFD <- aggregateNet(cellchat_HFD)
+
+# Compute the network centrality scores
+cellchat_HFD <- netAnalysis_computeCentrality(cellchat_HFD, slot.name = "netP") 
+ save(cellchat_HFD,file="cellchat_HFD.Rdata")
+
+#合并
+cellchat_list <- list(CD = cellchat_CD, HFD= cellchat_HFD)
+cellchat_merged <- mergeCellChat(cellchat_list, add.names = names(cellchat_list))
+#差异细胞通讯分析
+#比较相互作用数量
+gg1 <- compareInteractions(cellchat_merged, show.legend = F, group = c(1,2))
+ggsave(filename ="internum1.pdf",width=200,height=225,units="mm",plot = gg1)
+gg2 <- compareInteractions(cellchat_merged, show.legend = F, group = c(1,2), measure = "weight")
+ggsave(filename ="internumstren2.pdf",width=200,height=225,units="mm",plot = gg2)
+
+pdf("networkinterp1.pdf")
+  netVisual_diffInteraction(cellchat_merged, weight.scale = T)
+dev.off()
+
+pdf("networkinterp2.pdf")
+netVisual_diffInteraction(cellchat_merged, weight.scale = T, measure = "weight")
+dev.off()
+
+#> Do heatmap based on a merged object
+
+pdf("networkinterheatmap1.pdf")
+netVisual_heatmap(cellchat_merged)
+dev.off()
+#> Do heatmap based on a merged object
+pdf("networkinterheatmap2.pdf")
+netVisual_heatmap(cellchat_merged, measure = "weight")
+dev.off()
+
+
+
+#The differential network analysis only works for pairwise datasets. If there are more datasets for comparison, we can directly show the number of interactions or interaction strength between any two cell populations in each dataset.
+#To better control the node size and edge weights of the inferred networks across different datasets, we compute the maximum number of cells per cell group and the maximum number of interactions (or interaction weights) across all datasets.
+
+weight.max <- getMaxWeight(cellchat_list, attribute = c("idents","count"))
+
+pdf("networkHFD.pdf")
+ netVisual_circle(cellchat_list[[2]]@net$count, weight.scale = T, label.edge= F, edge.weight.max = weight.max[2], edge.width.max = 12, title.name = paste0("Number of interactions - ", names(cellchat_list)[2]))
+dev.off()
+
+
+
+### Compare the major sources and targets in 2D space
+## Comparing the outgoing and incoming interaction strength in 2D space allows ready identification of the cell populations with significant changes in sending or receiving signals between different datasets.
+
+num.link <- sapply(cellchat_list, function(x) {rowSums(x@net$count) + colSums(x@net$count)-diag(x@net$count)})
+weight.MinMax <- c(min(num.link), max(num.link)) # control the dot size in the different datasets
+
+pdf("2dHFD.pdf")
+ netAnalysis_signalingRole_scatter(cellchat_list[[2]], title = names(cellchat_list)[2], weight.MinMax = weight.MinMax)
+dev.off()
+
+library(ggplot2)
+
+# 提取 control 样本的数据
+df_CD <- data.frame(
+  outgoing = rowSums(cellchat_list$CD@net$weight),
+  incoming = colSums(cellchat_list$CD@net$weight),
+  group = "CD",
+  celltype = rownames(cellchat_list$CD@net$weight)
+)
+
+# 提取 treatment 样本的数据
+df_HFD<- data.frame(
+  outgoing = rowSums(cellchat_list$HFD@net$weight),
+  incoming = colSums(cellchat_list$HFD@net$weight),
+  group = "HFD",
+  celltype = rownames(cellchat_list$HFD@net$weight)
+)
+
+# 合并数据
+df_combined <- rbind(df_CD, df_HFD)
+
+p1 <-ggplot(df_combined, aes(x = outgoing, y = incoming, color = group, label = celltype)) +
+  geom_point(size = 3, alpha = 0.7) +
+  ggrepel::geom_text_repel(size = 3, max.overlaps = 20) +  # 避免标签重叠
+  scale_color_manual(values = c("CD" = "blue", "HFD" = "red")) +
+  labs(
+    x = "Outgoing interaction strength",
+    y = "Incoming interaction strength",
+    title = "Signaling Role Comparison"
+  ) +
+  theme_classic()
+ggsave(filename ="2DCDHFD.pdf",width=200,height=225,units="mm",plot = p1)
+
+#From the scatter plot, we can see that Inflam.DC and cDC1 emerge as one of the major source and targets in LS compared to NL. Fibroblast populations also become the major sources in LS.
+#Furthermore, we can identify the specific signaling changes of Inflam.DC and cDC1 between NL and LS. ## Identify signaling changes associated with one cell group
+pdf("CD8_2D.pdf")
+netAnalysis_signalingChanges_scatter(cellchat_merged, idents.use = "CD8+ T cell", signaling.exclude = "MIF")
+dev.off()
+
+
+
+pdf("networkbubbleto2.pdf",width=6,height=12)
+netVisual_bubble(cellchat_merged, 
+                 sources.use =1:5, 
+                 targets.use =2, 
+ #                comparison=c(1,2),
+                 angle.x = 45,
+                 remove.isolate = FALSE)
+dev.off()
+
+
+
+
+
+
+
+
+bubble_data <- netVisual_bubble(
+  cellchat_merged,
+  sources.use =1,
+  targets.use =1:5,
+comparison = c(1, 2),
+  angle.x = 45,
+  remove.isolate = FALSE,
+  return.data = TRUE  # 关键参数：返回数据而非绘图
+)
+comm_data <- bubble_data$communication
+plot_data <- comm_data[, c("source.target", "interaction_name_2", "prob", "pval","pathway_name", "dataset")]
+# 按dataset分组（CD vs HFD）
+cd_data <- subset(plot_data, dataset == "CD")
+hfd_data <- subset(plot_data, dataset == "HFD")
+
+#library(dplyr)
+
+diff_data <- full_join(
+  cd_data %>% select(source.target,interaction_name_2, prob, pval) %>% rename(prob_CD = prob, pval_CD = pval),
+  hfd_data %>% select(source.target,interaction_name_2, prob, pval) %>% rename(prob_HFD = prob, pval_HFD = pval),
+  by = "interaction_name_2"
+) %>%
+  mutate(
+    prob_diff = prob_HFD - prob_CD,
+    pval_max = pmax(pval_CD, pval_HFD, na.rm = TRUE)
+  )
+
+
+p1 <- ggplot(diff_data, aes(
+  x = source.target.x,
+  y = interaction_name_2, 
+  size = abs(pval_max),
+  color = prob_diff  # 直接映射prob_diff的连续值
+)) +
+  geom_point(alpha = 0.7) +
+  scale_size_continuous(
+    range = c(1, 3), 
+    name = "p-value"
+  ) +
+  scale_color_gradient2(
+    low = "blue",      # 负值（CD增强）
+    mid = "white",     # 中间值（无差异）
+    high = "red",      # 正值（HFD增强）
+    midpoint = 0,      # 设置中点为0
+    name = "Δ Probability\n(HFD - CD)"  # 修改图例标题
+  ) +
+ theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+  #  panel.grid.major = element_blank(),  # 移除主网格线
+#  panel.grid.minor = element_blank()
+  ) +
+  labs(
+    x = "source.target",
+    y = "L-R Interaction",
+    title = "Differential Cell-Cell Communication"
+  )
+ggsave(filename ="new3to2bubdiff1.pdf",width=150,height=280,units="mm",plot = p1)
+
+
+
+
+
+
+
+
+
+
+
+
+#Identify and visualize the conserved and context-specific signaling pathways
+#By comparing the information flow/interaction strengh of each signaling pathway, we can identify signaling pathways, (i) turn off, (ii) decrease, (iii) turn on or (iv) increase, by change their information flow at one condition as compared to another condition.
+#Compare the overall information flow of each signaling pathway
+#We can identify the conserved and context-specific signaling pathways by simply comparing the information flow for each signaling pathway, which is defined by the sum of communication probability among all pairs of cell groups in the inferred network (i.e., the total weights in the network).
+
+pdf("./barinforflow/barinforflowcdvshfd5-4.pdf",width=6,height=12)
+rankNet(cellchat_merged, mode = "comparison", stacked = T, do.stat = TRUE,sources.use =5,targets.use =4)
+dev.off()
+
+
+# Compare outgoing (or incoming) signaling associated with each cell population
+# The above analysis summarize the information from the outgoing and incoming signaling together. We can also compare the outgoing (or incoming) signaling pattern between two datasets, allowing to identify signaling pathways/ligand-receptors that exhibit different signaling patterns.
+# We can combine all the identified signaling pathways from different datasets and thus compare them side by side, including outgoing signaling, incoming signaling and overall signaling by aggregating outgoing and incoming signaling together. NB: rankNet also shows the comparison of overall signaling, but it does not show the signaling strength in specific cell populations.
+
+library(ComplexHeatmap)
+i = 1
+# combining all the identified signaling pathways from different datasets 
+pathway.union <- union(cellchat_list[[i]]@netP$pathways, cellchat_list[[i+1]]@netP$pathways)
+pdf("netanalysiscdhfdog.pdf",width=6,height=12)
+p1 <- netAnalysis_signalingRole_heatmap(cellchat_list[[2]], pattern = "incoming", signaling = pathway.union, title = names(cellchat_list)[2])
+mode(p1) #S4
+if (isS4(p1)) {
+  slotNames(p1)  # 列出所有可访问的字段
+
+}
+heatmap_matrix <- p1@matrix
+head(heatmap_matrix)
+heatmap_df <- as.data.frame(heatmap_matrix)
+write.csv(heatmap_df, "signaling_role_heatmap_HFDICdata.csv")
+
+pdf("netanalysishfdog1.pdf",width=6,height=12)
+netAnalysis_signalingRole_heatmap(cellchat_list[[i+1]], pattern = "outgoing", signaling = pathway.union, title = names(cellchat_list)[i+1], width = 9, height = 18)
+dev.off()
+
+
+pdf("netanalysishfdic2.pdf",width=6,height=12)
+netAnalysis_signalingRole_heatmap(cellchat_list[[i+1]], pattern = "incoming", signaling = pathway.union, title = names(cellchat_list)[i+1],width=8,height=16)
+dev.off()
+
+# Chord diagram
+pdf("chordhfdup1.pdf",width=6,height=6)
+netVisual_chord_gene(cellchat_list[[2]], sources.use = 1, targets.use = c(4:5),  lab.cex = 0.8, small.gap = 3.5, title.name = paste0("Up-regulated signaling in ", names(cellchat_list)[2]))
+dev.off()
+netVisual_chord_gene(cellchat_list[[2]], sources.use = 1:3, targets.use = c(4:5), slot.name = 'net', net = net.down, lab.cex = 0.8, small.gap = 3.5, title.name = paste0("Down-regulated signaling in ", names(cellchat_list)[2]))
+
+#######Apoe  Trem2
+load("CDHFD_allDATA1.Rdata")
+p1 <-FeaturePlot(CDHFD_allDATA1, 
+            features = "Trem2",
+            split.by = "replicate",  # 按样本类型拆分
+            label = TRUE, 
+            repel = TRUE,
+            order = TRUE)  # 表达高的细胞显示在上层
+ggsave("/picb/bigdata/project/guoxin/alldata/cellchat/Trem2feature.pdf", p1, width = 14, height = 7)
+
+lr_pairs <- extractEnrichedLR(cellchat_merged, signaling = "ApoE", geneLR.return = TRUE)
+ApoE_pairs <- cellchat_merged@DB$interaction[cellchat_merged@DB$interaction$pathway_name == "ApoE", ]
+
+
+########cellchat_list <- list(CD = cellchat_CD, HFD= cellchat_HFD)
+########cellchat_merged <- mergeCellChat(cellchat_list, add.names = names(cellchat_list))
+cellchat@meta$datasets = factor(cellchat@meta$datasets, levels = c("N", "s”))# set factor level
+p1 <-plotGeneExpression(cellchat_merged, signaling = "FN1", split.by = "datasets", colors.ggplot =T, type = "violin")
+ggsave("/picb/bigdata/project/guoxin/alldata/cellchat/Fn1violin.pdf", p1)
+
+
+
+CDHFD_allDATA1$celltype.sample <- paste(CDHFD_allDATA1$cell_type, CDHFD_allDATA1$replicate, sep = "_")
+Idents(CDHFD_allDATA1) <- "celltype.sample"
+CDHFD_allDATA1 <- PrepSCTFindMarkers(CDHFD_allDATA1)
+IM_SCmarker <- FindMarkers(CDHFD_allDATA1, ident.1 = "IM_HFD", ident.2 = "IM_CD")
+AM_SCmarker <- FindMarkers(CDHFD_allDATA1, ident.1 = "AM_HFD", ident.2 = "AM_CD")
+
+write.table(x = IM_SCmarker, file = "/picb/bigdata/project/guoxin/alldata/cellchat/IMSCHFDvsCD.txt", sep="\t",row.names =TRUE)
+write.table(x =AM_SCmarker, file = "/picb/bigdata/project/guoxin/alldata/cellchat/AMSCHFDvsCD.txt", sep="\t",row.names =TRUE)
+VlnPlot(CDHFD_allDATA1, features = c("Apoe", "Trem2"),idents = c("IM_HFD", "CD14 Mono_STIM"), group.by = "stim")
