@@ -1,13 +1,360 @@
-cell_type <- c("Epithelial","AM", "Neutrophil", "AM", "B cell", "Endothelial", "IM", "CD4+ T cell","Epithelial","Endothelial","Epithelial","Fibroblast","CD8+ T cell","Neutrophil","B cell","CD8+ T cell" ,"Endothelial","Endothelial","IM","IM","Monocyte","Epithelial","CD4+ T cell","Epithelial","Fibroblast","NK cell","AM","DC","IM","ciliated","B cell","Endothelial","nn","CD8+ T cell","CD4+ T cell","AM", "nn" )
-                   
-my_levels <- c("0","1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","21","22","23","24","25","26","27","28","29","30","31","32","33","34","35","36")
-CDHFD_allDATA1@meta.data$seurat_clusters <- factor(CDHFD_allDATA1@meta.data$seurat_clusters,levels=my_levels)
-Idents(CDHFD_allDATA1) <- CDHFD_allDATA1@meta.data$seurat_clusters
-
-names(cell_type) <- levels(CDHFD_allDATA1)
-CDHFD_allDATA1 <- RenameIdents(CDHFD_allDATA1, cell_type)
-CDHFD_allDATA1$cell_type <- Idents(CDHFD_allDATA1)
+load("/picb/bigdata/project/guoxin/alldata/CDHFD_allDATA1.Rdata")
+# 1. Convert to pseudobulks for major cell types
+exp<-to_pseudobulk(CDHFD_allDATA1)
+sapply(names(exp), FUN = function(cell_type) {
+	out.file = paste("pseudobulktest/", cell_type, "_cnt.txt", sep = '')
+	write.table(x = exp[[cell_type]], file = out.file, sep = "\t", quote = F)
+})
 
 
-save(CDHFD_allDATA1, file = "CDHFD_allDATA1.Rdata")
 
+
+library(DESeq2)
+
+# For each cell type or subtype
+for (cell_type in c("Epithelial", "CD4+ T cell", "CD8+ T cell", "DC", "AM", "Monocyte", "NK cell", "B cell", "Endothelial","IM","Neutrophil","Fibroblast","ciliated","nn")) {
+	cnt.file<-paste("/picb/bigdata/project/guoxin/alldata/pseudobulk/", cell_type, "_cnt.txt", sep = "")		# Input file:pseudobulk count
+	cpm.file<-paste("/picb/bigdata/project/guoxin/alldata/stat1/", cell_type, "_cpm.txt", sep = "")		# Output file: CPM normalization
+	stat.file<-paste("/picb/bigdata/project/guoxin/alldata/stat1/", cell_type, "_stat.txt", sep = "")	# Output file: test statistics
+	
+	# Count data and meta info
+	# 'Replicate' is biological replicate, 'label' is before or after immunization
+	data<-read.table(cnt.file, header = T)
+	meta<-data.frame(label =c("CD", "CD","CD","HFD","HFD","HFD") , 
+		replicate = c("1","2","3","1","2","3")) #continuous
+
+	dds<-DESeqDataSetFromMatrix(countData = data, colData = meta, design = ~replicate + label)
+	
+	# CPM normalization
+	cpm<-fpm(dds)
+	write.table(cpm, file = cpm.file, sep = "\t", quote = F)
+
+	# Pre-filtering low expression genes (only minimum filtering is needed here)
+	keep<-rowSums(counts(dds)) >= 10
+	dds<-dds[keep,]
+
+	# DEG
+	dds<-DESeq(dds)
+	res<-results(dds)   #res<-results(dds)#BH
+	
+	res<-as.data.frame(res)
+	res<-res[order(res$padj),]
+
+	# padj < 0.05
+	#write.table(subset(res, padj <= 0.05,), file = stat.file, sep = "\t", quote = F)
+	write.table(res, file = stat.file, sep = "\t", quote = F)
+}
+
+
+
+# GO and KEGG enrichment with clusterProfiler
+library(clusterProfiler)
+#BiocManager::install("org.Mm.eg.db")
+library(org.Mm.eg.db)
+library(ggplot2)
+
+# Input file
+# ？？x Note: The logFC is 'before - after', so logFC > 0 is down-regulated DEGs after, logFC < 0 is up-regulated DEGs after. 
+stat<-read.table("/picb/bigdata/project/guoxin/alldata/stat1/NK cell_stat.txt", header = T, sep = "\t")
+
+genecut<-0.2	# DEG cut off
+enrichcut<-0.05	# enrichment cut off
+
+# Significant DEGs (can distinguish down- and up-regulated DEGs)
+#sig<-subset(stat, padj < genecut)
+sig<-subset(stat, padj < genecut & log2FoldChange < 0) #gt0 up    lt0 down
+
+# Gene symbol to ID
+symbols<-rownames(sig)
+
+map<-bitr(symbols, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Mm.eg.db")
+id<-map$ENTREZID # 8%failed
+
+
+
+
+
+
+
+rst<-data.frame()
+
+##### PART I. GO enrichment #####
+# GO MF enrichment
+ego.mf<-enrichGO(gene = id, OrgDb = "org.Mm.eg.db", ont = "MF", pvalueCutoff = enrichcut)
+ego.mf<-simplify(ego.mf)								# Remove redundancy
+ego.mf<-setReadable(ego.mf, 'org.Mm.eg.db', 'ENTREZID')	# convert ID to symbol
+ego.mf<-as.data.frame(ego.mf)
+
+if (nrow(ego.mf) > 0) rst<-rbind(rst, data.frame(Function = "GO_MF", ego.mf))  
+
+# GO BP enrichment
+ego.bp<-enrichGO(gene = id, OrgDb = "org.Mm.eg.db", ont = "BP", pvalueCutoff = enrichcut)
+ego.bp<-simplify(ego.bp)
+ego.bp<-setReadable(ego.bp, 'org.Mm.eg.db', 'ENTREZID')
+ego.bp<-as.data.frame(ego.bp)
+
+if (nrow(ego.bp) > 0) rst<-rbind(rst, data.frame(Function = "GO_BP", ego.bp))  
+write.table(x = rst, file = "/picb/bigdata/project/guoxin/alldata/enrich/Neutrophil_DOWNenrichGO0.2.txt", sep = "\t", quote = F, row.names = F)
+
+
+##### PART II. KEGG enrichment #####
+ekegg<-enrichKEGG(gene = id, organism = 'mmu', pvalueCutoff = enrichcut)
+ekegg<-setReadable(ekegg, 'org.Mm.eg.db', 'ENTREZID')
+ekegg<-as.data.frame(ekegg)
+#if (nrow(ekegg) > 0) rst<-rbind(rst, data.frame(Function = "KEGG", ekegg))
+write.table(x = ekegg, file = "/picb/bigdata/project/guoxin/alldata/enrich/Neutrophil_DOWNenrichKEGG0.2.txt", sep = "\t", quote = F, row.names = F)
+
+
+
+
+
+
+##### PART III. Hallmark gene sets enrichment ##### haven't run
+# Read hallmark gmt file
+gmt<-read.gmt("h.all.v2023.2.Hs.symbols.gmt")
+egmt<-enricher(symbols, pvalueCutoff = enrichcut, TERM2GENE = gmt)
+egmt<-as.data.frame(egmt)
+if (nrow(egmt) > 0) rst<-rbind(rst, data.frame(Function = "Hallmark", egmt))
+
+write.table(x = rst, file = "Mono_up_enrich.txt", sep = "\t", quote = F, row.names = F)
+
+
+
+#AM
+AM_UPgokegg <- read.csv("G:/talkandlabmeeting/doctor3-1/scRNA/enrich/AM_UPenrichGO.csv",header = T)
+AM_UPgokegg<- AM_UPgokegg[1:15,]
+library(ggplot2)
+AM_UPgokegg$logPadj <- -log(AM_UPgokegg$p.adjust)
+AM_UPgokegg$Count <- factor(AM_UPgokegg$Count)
+
+pAM_UPgokegg <- ggplot(data = AM_UPgokegg,mapping = aes(x =Count,y = Description))+
+  geom_point(aes(color= logPadj,size = Count)) +
+  scale_colour_gradient(high = 'red',low = 'purple') +
+  theme_bw()+
+  labs(title = 'AM_UPgokegg',
+       x = 'Count',
+       y = 'Description')
+ggsave(filename ="G:/talkandlabmeeting/doctor3-1/scRNA/enrich/AM_UPgokegg.pdf",width=200,height=225,units="mm",plot = pAM_UPgokegg)
+
+
+
+AM_DOWNgokegg <- read.csv("G:/talkandlabmeeting/doctor3-1/scRNA/enrich/AM_DOWNenrichKEGGGO.csv",header = T)
+AM_DOWNgokegg<- AM_DOWNgokegg[1:15,]
+library(ggplot2)
+AM_DOWNgokegg$logPadj <- -log(AM_DOWNgokegg$p.adjust)
+AM_DOWNgokegg$Count <- factor(AM_DOWNgokegg$Count)
+
+pAM_DOWNgokegg <- ggplot(data = AM_DOWNgokegg,mapping = aes(x =Count,y = Description))+
+  geom_point(aes(color= logPadj,size = Count)) +
+  scale_colour_gradient(high = 'red',low = 'purple') +
+  theme_bw()+
+  labs(title = 'AM_DOWNgokegg',
+       x = 'Count',
+       y = 'Description')
+ggsave(filename ="G:/talkandlabmeeting/doctor3-1/scRNA/enrich/AM_DOWNgokegg.pdf",width=200,height=225,units="mm",plot = pAM_DOWNgokegg)
+
+
+
+#CD4+ T UP
+
+CD4Tcell_UPenrichKEGGGO <- read.csv("G:/talkandlabmeeting/doctor3-1/scRNA/enrich/CD4+ T cell_UPenrichKEGGGO.csv",header = T)
+#AM_DOWNgokegg<- AM_DOWNgokegg[1:15,]
+library(ggplot2)
+CD4Tcell_UPenrichKEGGGO$logPadj <- -log(CD4Tcell_UPenrichKEGGGO$p.adjust)
+CD4Tcell_UPenrichKEGGGO$Count <- factor(CD4Tcell_UPenrichKEGGGO$Count)
+
+pCD4Tcell_UPenrichKEGGGO <- ggplot(data = CD4Tcell_UPenrichKEGGGO,mapping = aes(x =Count,y = Description))+
+  geom_point(aes(color= logPadj,size = Count)) +
+  scale_colour_gradient(high = 'red',low = 'purple') +
+  theme_bw()+
+  labs(title = 'CD4Tcell_UPenrichKEGGGO',
+       x = 'Count',
+       y = 'Description')
+ggsave(filename ="G:/talkandlabmeeting/doctor3-1/scRNA/enrich/CD4Tcell_UPenrichKEGGGO.pdf",width=200,height=225,units="mm",plot = pCD4Tcell_UPenrichKEGGGO)
+
+
+
+
+#CD8+T
+CD8Tcell_UPenrichKEGGGO <- read.csv("G:/talkandlabmeeting/doctor3-1/scRNA/enrich/CD8+ T cell_UPenrichKEGGGO.csv",header = T)
+#AM_DOWNgokegg<- AM_DOWNgokegg[1:15,]
+library(ggplot2)
+CD8Tcell_UPenrichKEGGGO$logPadj <- -log(CD8Tcell_UPenrichKEGGGO$p.adjust)
+CD8Tcell_UPenrichKEGGGO$Count <- factor(CD8Tcell_UPenrichKEGGGO$Count)
+
+pCD8Tcell_UPenrichKEGGGO <- ggplot(data = CD8Tcell_UPenrichKEGGGO,mapping = aes(x =Count,y = Description))+
+  geom_point(aes(color= logPadj,size = Count)) +
+  scale_colour_gradient(high = 'red',low = 'purple') +
+  theme_bw()+
+  labs(title = 'CD8Tcell_UPenrichKEGGGO',
+       x = 'Count',
+       y = 'Description')
+ggsave(filename ="G:/talkandlabmeeting/doctor3-1/scRNA/enrich/CD8Tcell_UPenrichKEGGGO.pdf",width=200,height=225,units="mm",plot = pCD8Tcell_UPenrichKEGGGO)
+
+
+# UP
+Endothelial_UPenrichKEGGGO <- read.csv("G:/talkandlabmeeting/doctor3-1/scRNA/enrich/Endothelial_UPenrichKEGGGO.csv",header = T)
+#AM_DOWNgokegg<- AM_DOWNgokegg[1:15,]
+library(ggplot2)
+Endothelial_UPenrichKEGGGO$logPadj <- -log(Endothelial_UPenrichKEGGGO$p.adjust)
+Endothelial_UPenrichKEGGGO$Count <- factor(Endothelial_UPenrichKEGGGO$Count)
+
+pEndothelial_UPenrichKEGGGO <- ggplot(data = Endothelial_UPenrichKEGGGO,mapping = aes(x =Count,y = Description))+
+  geom_point(aes(color= logPadj,size = Count)) +
+  scale_colour_gradient(high = 'red',low = 'purple') +
+  theme_bw()+
+  labs(title = 'DC_UPenrichKEGGGO',
+       x = 'Count',
+       y = 'Description')
+ggsave(filename ="G:/talkandlabmeeting/doctor3-1/scRNA/enrich/Endothelial_UPenrichKEGGGO.pdf",width=200,height=225,units="mm",plot = pEndothelial_UPenrichKEGGGO)
+
+#IM UP
+IM_UPenrichKEGGGO <- read.csv("G:/talkandlabmeeting/doctor3-1/scRNA/enrich/IM_UPenrichKEGGGO.csv",header = T)
+#AM_DOWNgokegg<- AM_DOWNgokegg[1:15,]
+library(ggplot2)
+IM_UPenrichKEGGGO$logPadj <- -log(IM_UPenrichKEGGGO$p.adjust)
+IM_UPenrichKEGGGO$Count <- factor(IM_UPenrichKEGGGO$Count)
+
+pIM_UPenrichKEGGGO <- ggplot(data = IM_UPenrichKEGGGO,mapping = aes(x =Count,y = Description))+
+  geom_point(aes(color= logPadj,size = Count)) +
+  scale_colour_gradient(high = 'red',low = 'purple') +
+  theme_bw()+
+  labs(title = 'IM_UPenrichKEGGGO',
+       x = 'Count',
+       y = 'Description')
+ggsave(filename ="G:/talkandlabmeeting/doctor3-1/scRNA/enrich/IM_UPenrichKEGGGO.pdf",width=200,height=225,units="mm",plot = pIM_UPenrichKEGGGO)
+
+
+#IM DOWN
+IM_DOWNenrichKEGGGO <- read.csv("G:/talkandlabmeeting/doctor3-1/scRNA/enrich/IM_DOWNenrichKEGGGO.csv",header = T)
+#AM_DOWNgokegg<- AM_DOWNgokegg[1:15,]
+library(ggplot2)
+IM_DOWNenrichKEGGGO$logPadj <- -log(IM_DOWNenrichKEGGGO$p.adjust)
+IM_DOWNenrichKEGGGO$Count <- factor(IM_DOWNenrichKEGGGO$Count)
+
+pIM_DOWNenrichKEGGGO <- ggplot(data = IM_DOWNenrichKEGGGO,mapping = aes(x =Count,y = Description))+
+  geom_point(aes(color= logPadj,size = Count)) +
+  scale_colour_gradient(high = 'red',low = 'purple') +
+  theme_bw()+
+  labs(title = 'IM_UPenrichKEGGGO',
+       x = 'Count',
+       y = 'Description')
+ggsave(filename ="G:/talkandlabmeeting/doctor3-1/scRNA/enrich/IM_DOWNenrichKEGGGO.pdf",width=200,height=225,units="mm",plot = pIM_DOWNenrichKEGGGO)
+
+
+
+
+#NK UP
+NK_UPenrichKEGGGO <- read.csv("G:/talkandlabmeeting/doctor3-1/scRNA/enrich/NK_UPenrichKEGGGO.csv",header = T)
+#AM_DOWNgokegg<- AM_DOWNgokegg[1:15,]
+library(ggplot2)
+NK_UPenrichKEGGGO$logPadj <- -log(NK_UPenrichKEGGGO$p.adjust)
+NK_UPenrichKEGGGO$Count <- factor(NK_UPenrichKEGGGO$Count)
+
+pNK_UPenrichKEGGGO <- ggplot(data = NK_UPenrichKEGGGO,mapping = aes(x =Count,y = Description))+
+  geom_point(aes(color= logPadj,size = Count)) +
+  scale_colour_gradient(high = 'red',low = 'purple') +
+  theme_bw()+
+  labs(title = 'NK_UPenrichKEGGGO',
+       x = 'Count',
+       y = 'Description')
+ggsave(filename ="G:/talkandlabmeeting/doctor3-1/scRNA/enrich/NK_UPenrichKEGGGO.pdf",width=200,height=225,units="mm",plot = pNK_UPenrichKEGGGO)
+
+
+
+
+
+#volcano plot
+install.packages("ggrepel")
+library(ggplot2)
+library(ggrepel)
+
+AM_stat <- read.table("G:/talkandlabmeeting/doctor3-1/scRNA/enrich/AM_stat.txt",sep = "\t",header = TRUE)
+threshold <- 0.05
+AM_stat$Significant <- ifelse(AM_stat$padj < threshold, "Significant", "Not Significant")
+
+p1 <- ggplot(AM_stat, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(aes(color = Significant), alpha = 0.8, size = 1.5) +
+  scale_color_manual(values = c("gray", "red")) +  
+  geom_vline(xintercept = c(-1, 1), col = "black", linetype = "dashed") +  
+  geom_hline(yintercept = -log10(threshold), col = "black", linetype = "dashed") +  
+  theme_minimal() +
+  labs(x = "log2(Fold Change)", y = "-log10(Adjusted p-value)") +
+  ggtitle("Volcano Plot") +
+  geom_text_repel(data = subset(AM_stat, Significant == "Significant"), 
+                  aes(label = gene), size = 3)
+p1
+
+
+IM_stat <- read.table("G:/talkandlabmeeting/doctor3-1/scRNA/enrich/IM_stat.txt",sep = "\t",header = TRUE)
+threshold <- 0.05
+IM_stat$Significant <- ifelse(IM_stat$padj < threshold, "Significant", "Not Significant")
+
+p1 <- ggplot(IM_stat, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(aes(color = Significant), alpha = 0.8, size = 1.5) +
+  scale_color_manual(values = c("gray", "red")) +  
+  geom_vline(xintercept = c(-1, 1), col = "black", linetype = "dashed") +  
+  geom_hline(yintercept = -log10(threshold), col = "black", linetype = "dashed") +  
+  theme_minimal() +
+  labs(x = "log2(Fold Change)", y = "-log10(Adjusted p-value)") +
+  ggtitle("Volcano Plot") +
+  geom_text_repel(data = subset(IM_stat, Significant == "Significant" ), 
+                  aes(label = gene), size = 3)
+p1
+
+
+CD4_stat <- read.table("G:/talkandlabmeeting/doctor3-1/scRNA/enrich/CD4+ T cell_stat.txt",sep = "\t",header = TRUE)
+threshold <- 0.05
+CD4_stat$Significant <- ifelse(CD4_stat$padj < threshold , "Significant", "Not Significant")
+
+p1 <- ggplot(CD4_stat, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(aes(color = Significant), alpha = 0.8, size = 1.5) +
+  scale_color_manual(values = c("gray", "red")) +  
+  geom_vline(xintercept = c(-1, 1), col = "black", linetype = "dashed") +  
+  geom_hline(yintercept = -log10(threshold), col = "black", linetype = "dashed") +  
+  theme_minimal() +
+  labs(x = "log2(Fold Change)", y = "-log10(Adjusted p-value)") +
+  ggtitle("Volcano Plot") +
+  geom_text_repel(data = subset(CD4_stat, Significant == "Significant" ), 
+                  aes(label = gene), size = 3)
+p1
+
+
+
+CD8_stat <- read.table("G:/talkandlabmeeting/doctor3-1/scRNA/enrich/CD8+ T cell_stat.txt",sep = "\t",header = TRUE)
+threshold <- 0.05
+CD8_stat$Significant <- ifelse(CD8_stat$padj < threshold, "Significant", "Not Significant")
+
+p1 <- ggplot(CD8_stat, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(aes(color = Significant), alpha = 0.8, size = 1.5) +
+  scale_color_manual(values = c("gray", "red")) +  
+  geom_vline(xintercept = c(-1, 1), col = "black", linetype = "dashed") +  
+  geom_hline(yintercept = -log10(threshold), col = "black", linetype = "dashed") +  
+  theme_minimal() +
+  labs(x = "log2(Fold Change)", y = "-log10(Adjusted p-value)") +
+  ggtitle("Volcano Plot") +
+  geom_text_repel(data = subset(CD8_stat, Significant == "Significant"), 
+                  aes(label = gene), size = 3)
+p1
+
+
+write.csv(x = CD8_stat, file = 'G:/talkandlabmeeting/doctor3-1/scRNA/enrich/CD8stat.csv', row.names = FALSE)
+write.csv(x = CD4_stat, file = 'G:/talkandlabmeeting/doctor3-1/scRNA/enrich/CD4stat.csv', row.names = FALSE)
+write.csv(x = IM_stat, file = 'G:/talkandlabmeeting/doctor3-1/scRNA/enrich/IMstat.csv', row.names = FALSE)
+write.csv(x = AM_stat, file = 'G:/talkandlabmeeting/doctor3-1/scRNA/enrich/AMstat.csv', row.names = FALSE)
+
+
+IM_stat <- read.csv("G:/talkandlabmeeting/doctor3-1/scRNA/enrich/IMstat.csv",header = TRUE)
+
+
+p2 <- ggplot(IM_stat, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(aes(color = Significant), alpha = 0.8, size = 1.5) +
+  scale_color_manual(values = c("gray", "red","blue")) +  
+  geom_vline(xintercept = c(-1, 1), col = "black", linetype = "dashed") +  
+  geom_hline(yintercept = -log10(threshold), col = "black", linetype = "dashed") +  
+  theme_minimal() +
+  labs(x = "log2(Fold Change)", y = "-log10(Adjusted p-value)") +
+  ggtitle("Volcano Plot") +
+  geom_text_repel(data = subset(IM_stat, Significant == "Significant1"), 
+                  aes(label = gene), size = 3)
+p2
