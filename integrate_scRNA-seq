@@ -284,3 +284,116 @@ ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/CD2CONTENT/CD2markers.pdf",
 
 # Save integrated data
 save(CD2_2, file = "CD2_2.Rdata")
+
+
+#integrate
+# Integrate samples CD-HFD
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+
+# Samples and UMI cutoffs
+samples<-c("CD1", "CD2","CD3","HFD1","HFD2","HFD3")
+
+# Output directory
+
+#setwd("/picb/bigdata/project/guoxin/ingradiatecdhfd/")
+
+# Read data and data QC
+data_list<-lapply(samples, FUN = function(sample) {
+  # read data
+  data_dir<-paste("/picb/bigdata/project/guoxin/ingradiatecdhfd/", sample,  sep = "")
+  sample_data<-Read10X(data.dir = data_dir)
+  
+  # project should be different for each sample
+  sample_data<-CreateSeuratObject(counts = sample_data, project = sample, assay = "RNA")
+  
+  # data QC
+  sample_data[["percent.mt"]]<-PercentageFeatureSet(sample_data, pattern = "^mt-")
+  sample_data<-subset(sample_data, subset= nFeature_RNA >200 & nFeature_RNA <60000 & percent.mt <20)
+  
+})
+
+data_list<-lapply(data_list, FUN = SCTransform)
+
+# Integrate data based on SCT
+features<-SelectIntegrationFeatures(data_list, nfeatures = 3000)
+data_list<-PrepSCTIntegration(data_list, anchor.features = features)
+anchors<-FindIntegrationAnchors(data_list, normalization.method = "SCT", anchor.features = features)
+CDHFD_allDATA<-IntegrateData(anchorset = anchors, normalization.method = "SCT")
+
+# Dimensional reduction
+CDHFD_allDATA<-RunPCA(CDHFD_allDATA)
+CDHFD_allDATA<-RunUMAP(CDHFD_allDATA, reduction = "pca", dims = 1:30)
+
+# Clustering (default resolution 0.8)
+CDHFD_allDATA<-FindNeighbors(CDHFD_allDATA, reduction = "pca", dims = 1:30)
+CDHFD_allDATA<-FindClusters(CDHFD_allDATA)
+
+# UMAP可视化，按样本分色
+UMAPsample <-DimPlot(CDHFD_allDATA, reduction = "umap", group.by = "orig.ident")
+ggsave("/picb/bigdata/project/guoxin/alldata/cdhfdsample.pdf", UMAPsample)
+# UMAP可视化，按簇分色
+UMAPcluster <- DimPlot(CDHFD_allDATA, reduction = "umap", label = TRUE)
+ggsave("/picb/bigdata/project/guoxin/alldata/cdhfdcluster.pdf", UMAPcluster)
+
+UMAPclusterSAMPLE <- DimPlot(CDHFD_allDATA, reduction = "umap", split.by= "orig.ident")
+ggsave("/picb/bigdata/project/guoxin/alldata/cdhfdclustersample.pdf", UMAPclusterSAMPLE,width = 25, height = 5)
+
+
+DefaultAssay(CDHFD_allDATA)<-"SCT"
+my_levels <- c("11","24","9","5","16","17","31","8","10","0","23","21","2","13","20","27","19","28","6","18","26","3","35","1","29","4","14","30","25","12","15","33","22","7","34","32","36")
+CDHFD_allDATA@meta.data$seurat_clusters <- factor(CDHFD_allDATA@meta.data$seurat_clusters,levels=my_levels)
+Idents(CDHFD_allDATA) <- CDHFD_allDATA@meta.data$seurat_clusters
+
+
+
+markers<-DotPlot(CDHFD_allDATA, features = c(
+ "Cd3d", "Cd3g", "Cd4",  "Cd8b1",	# T cells
+  "Ncr1", 		# NK cells
+  "Ms4a1", 	# B cells
+  "Csf1r", "Plac8",		# Monocytes
+  "C1qa", "Lpl","Itgax",	# Macrophage
+ "Retnlg",	#Neutrophil
+  "Csf3r","Fcgr3", "Xcr1",	"Mgl2",		# DC
+"Ager", "Epcam","Hopx","Sftpc","Areg",                            #epithelial
+"Ptprb","Vwf","Car4","Tmem212", #endothelial
+"Col1a1","Pdgfra","Inmt","Pdgfrb","Col14a1","Mcpt8"#fibroblast
+),) + RotatedAxis()	
+
+
+
+
+ggsave("/picb/bigdata/project/guoxin/alldata/CDHFDALLmarkers_0.8-1.pdf", markers,width = 9, height = 7)
+
+
+CDHFD_allDATA1 <- PrepSCTFindMarkers(CDHFD_allDATA)
+CDHFD_allDATAallmarkers <- FindAllMarkers(CDHFD_allDATA1,only.pos = TRUE)
+All_markers <- CDHFD_allDATAallmarkers %>% group_by(cluster)
+write.table(All_markers[All_markers$p_val_adj <=0.05,],file="/picb/bigdata/project/guoxin/alldata/cdHFDallmarkergenes.txt",sep="\t",col.names = TRUE,row.names = FALSE,quote = FALSE)
+
+
+
+# 提取细胞的聚类信息和样本信息
+cell_info <- data.frame(Cluster = Idents(CDHFD_allDATA), Sample = CDHFD_allDATA$orig.ident)
+
+# 统计每个cluster中每个样本的细胞数量
+cluster_sample_counts <- table(cell_info$Cluster, cell_info$Sample)
+
+# 将计数转换为比例
+#cluster_sample_proportions <- prop.table(cluster_sample_counts, 1)
+
+# 打印结果
+print(cluster_sample_proportions)
+write.table(cluster_sample_counts,file="/picb/bigdata/project/guoxin/alldata/CDHFDintegratecounts.xls",sep="\t",col.names = TRUE)
+
+save(CDHFD_allDATA, file = "/picb/bigdata/project/guoxin/alldata/CDHFD_allDATA.Rdata")
+
+my_levels <- c("8","10","0","23","21","11","24","9","5","16","17","31","2","13","20","27","19","28","6","18","26","3","35","1","29","4","14","30","25","12","15","33","22","7","34","32","36")
+CDHFD_allDATA@meta.data$seurat_clusters <- factor(CDHFD_allDATA@meta.data$seurat_clusters,levels=my_levels)
+Idents(CDHFD_allDATA) <- CDHFD_allDATA@meta.data$seurat_clusters
+
+ADCSCCallintemarkers<-DotPlot(CDHFD_allDATA, features = c( "Sftpb", "Tmsb4x","Mal", "Ffar4", "Foxq1","Bcam","Selenbp1", "Lgals4","Krt7",  "Prdx6","Atp1a1", "Clu",  "Ly6g6c","F3","Sprr2a3", "Krt15","Sprr1a","Slurp1","Gsta1", "Krt19", "Anxa10","Lgals3","Krt6a","Aqp3","Krt4","Tff1","Ivl","Gkn2","Odc1","Krt14","Krt5","Sncg","S100a10","Car2","Lgals1","Ly6c1","Hsp90aa1","Tmsb10","Plet1","Tuba1b","Klk8","Mt2","Ppbp","Epcam","B2m","Ager","Cldn18","Sftpc","Sftpa1","Pifo","Foxj1","Hydin",
+"Cfap299","Scgb3a1","Scgb3a2","Cd24a","Muc1","Napsa","Nkx2-1","Msln","Trp63","Ntrk2","Sox2","Krt17","Chga","Syp","Ncam1","Tuba1a","Vim","Serpine1","Cdh1","Malat1","Neat1","Mki67","Top2a","Tacstd2","Prkcsh" ),) + RotatedAxis()	
+ggsave("/picb/bigdata/project/guoxin/alldata/CDHDallADCSCCallinte1.pdf", ADCSCCallintemarkers,width = 18, height = 9)
