@@ -149,7 +149,138 @@ markers<-DotPlot(HFD3_2, features = c(
 "Col1a1","Pdgfra","Inmt","Pdgfrb","Col14a1","Mcpt8"#fibroblast
 ),) + RotatedAxis()	
 
+######CD3#############
+CD3_data<-Read10X(data.dir = "/picb/bigdata/project/guoxin/ingradiatecdhfd/CD3/")
+CD3<-CreateSeuratObject(counts = CD3_data, project = "CD3", assay = "RNA")
+head(CD3@meta.data)
+CD3
+CD3[["percent.mt"]] <- PercentageFeatureSet(CD3, pattern = "^mt-")
+
+p1 <- VlnPlot(CD3,features = c("nFeature_RNA","nCount_RNA","percent.mt"),ncol = 3)#violin plot
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/CD3CONTENT/cd3violin.pdf", p1,width = 14, height = 7)
+plot1 <- FeatureScatter(CD3,feature1 = "nCount_RNA",feature2 = "percent.mt")
+plot2 <- FeatureScatter(CD3,feature1 = "nCount_RNA",feature2 = "nFeature_RNA")
+p2 <- plot1+plot2
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/CD3CONTENT/cd3point.pdf", p2,width = 14, height = 7)
+CD3 <- subset(CD3,
+                 subset= nFeature_RNA >200 & nFeature_RNA <60000 & percent.mt <20 )
+CD3
+# SCT normalization
+CD3<-SCTransform(CD3, verbose = FALSE)
+# Dimensinal reduction
+CD3_1<-RunPCA(CD3, verbose = FALSE)
+CD3_2<-RunUMAP(CD3_1, dims = 1:30, verbose = FALSE)
+p3 <- DimPlot(CD3_2,reduction = "umap")
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/CD3CONTENT/cd3umap.pdf", p3,width = 7, height = 7)
+# Clustering
+CD3_2<-FindNeighbors(CD3_2, dims = 1:30, verbose = FALSE)
+CD3_2<-FindClusters(CD3_2, verbose = FALSE,resolution = 0.8)
+head(Idents(CD3_2))
+CD3markers <- FindAllMarkers(CD3_2,only.pos = TRUE) #find markergenes
+All_markers <- CD3markers %>% group_by(cluster)
+write.table(All_markers[All_markers$p_val_adj <=0.05,],file="/picb/bigdata/project/guoxin/ingradiatecdhfd/CD3CONTENT/CD3markergenes.txt",sep="\t",col.names = TRUE,row.names = FALSE,quote = FALSE)
+
+# Plot cluster
+cluster<-DimPlot(CD3_2, label = TRUE)
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/CD3CONTENT/cluster.pdf", cluster)
+
+# Plot UMI count and mt gene content across cluster
+CD3_2[["log_nCount_RNA"]]<-log10(CD3_2[["nCount_RNA"]])
+qc<-FeaturePlot(CD3_2, features = c("log_nCount_RNA", "percent.mt"))
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/CD3CONTENT/qc.pdf", qc, width = 14, height = 7)
+
+# Plot markers
+head(CD3_2@meta.data)
+my_levels <- c("9","18","11","7","6","14","17","15","5","4","19","0","13","2","8","1","3","10","12","16","22","23","21","20","24")
+CD3_2@meta.data$seurat_clusters <- factor(CD3_2@meta.data$seurat_clusters,levels=my_levels)
+Idents(CD3_2) <- CD3_2@meta.data$seurat_clusters
+
+markers<-DotPlot(CD3_2, features = c(
+ "Cd3d", "Cd3g", "Cd4",  "Cd8b1",	# T cells
+  "Ncr1", 		# NK cells
+  "Ms4a1", 	# B cells
+  "Csf1r", "Plac8",		# Monocytes
+  "C1qa", "Lpl","Itgax",	# Macrophage
+ "Retnlg",	#Neutrophil
+  "Csf3r","Fcgr3", "Xcr1",	"Mgl2",		# DC
+"Ager", "Epcam","Hopx","Sftpc","Areg",                            #epithelial
+"Ptprb","Vwf","Car4","Tmem212", #endothelial
+"Col1a1","Pdgfra","Inmt","Pdgfrb","Col14a1","Mcpt8"#fibroblast
+),) + RotatedAxis()	
+
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/CD3CONTENT/CD3markers.pdf", markers,width = 9, height = 7)
+
+# Save integrated data
+save(CD3_2, file = "CD3_2.Rdata")
+
+
 ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/HFD3CONTENT/HFD3markers.pdf", markers,width = 9, height = 7)
 
 # Save integrated data
 save(HFD3_2, file = "HFD3_2.Rdata")
+
+
+
+###CD2###
+CD2_data<-Read10X(data.dir = "/picb/bigdata/project/guoxin/ingradiatecdhfd/CD2/")
+CD2<-CreateSeuratObject(counts = CD2_data, project = "CD2", assay = "RNA")
+head(CD2@meta.data)
+CD2
+CD2[["percent.mt"]] <- PercentageFeatureSet(CD2, pattern = "^mt-")
+
+p1 <- VlnPlot(CD2,features = c("nFeature_RNA","nCount_RNA","percent.mt"),ncol = 3)#violin plot
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/CD2CONTENT/cd2violin.pdf", p1,width = 14, height = 7)
+plot1 <- FeatureScatter(CD2,feature1 = "nCount_RNA",feature2 = "percent.mt")
+plot2 <- FeatureScatter(CD2,feature1 = "nCount_RNA",feature2 = "nFeature_RNA")
+p2 <- plot1+plot2
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/CD2CONTENT/cd2point.pdf", p2,width = 14, height = 7)
+CD2 <- subset(CD2,
+                 subset= nFeature_RNA >200 & nFeature_RNA <60000 & percent.mt <20 )
+CD2
+# SCT normalization
+CD2<-SCTransform(CD2, verbose = FALSE)
+# Dimensinal reduction
+CD2_1<-RunPCA(CD2, verbose = FALSE)
+CD2_2<-RunUMAP(CD2_1, dims = 1:30, verbose = FALSE)
+p3 <- DimPlot(CD2_2,reduction = "umap")
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/CD2CONTENT/cd2umap.pdf", p3,width = 7, height = 7)
+# Clustering
+CD2_2<-FindNeighbors(CD2_2, dims = 1:30, verbose = FALSE)
+CD2_2<-FindClusters(CD2_2, verbose = FALSE,resolution = 0.8)
+head(Idents(CD2_2))
+CD2markers <- FindAllMarkers(CD2_2,only.pos = TRUE) #find markergenes
+All_markers <- CD2markers %>% group_by(cluster)
+write.table(All_markers[All_markers$p_val_adj <=0.05,],file="/picb/bigdata/project/guoxin/ingradiatecdhfd/CD2CONTENT/CD2markergenes.txt",sep="\t",col.names = TRUE,row.names = FALSE,quote = FALSE)
+
+# Plot cluster
+cluster2<-DimPlot(CD2_2, label = TRUE)
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/CD2CONTENT/cluster.pdf", cluster2)
+
+# Plot UMI count and mt gene content across cluster
+CD2_2[["log_nCount_RNA"]]<-log10(CD2_2[["nCount_RNA"]])
+qc<-FeaturePlot(CD2_2, features = c("log_nCount_RNA", "percent.mt"))
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/CD2CONTENT/qc.pdf", qc, width = 14, height = 7)
+
+# Plot markers
+head(CD2_2@meta.data)
+my_levels2 <- c("9","10","11","7","4","13","15","19","5","14","17","2","16","6","18","8","3","0","1","12","24","23","21","20","22")
+CD2_2@meta.data$seurat_clusters <- factor(CD2_2@meta.data$seurat_clusters,levels=my_levels2)
+Idents(CD2_2) <- CD2_2@meta.data$seurat_clusters
+
+markers<-DotPlot(CD2_2, features = c(
+ "Cd3d", "Cd3g", "Cd4",  "Cd8b1",	# T cells
+  "Ncr1", 		# NK cells
+  "Ms4a1", 	# B cells
+  "Csf1r", "Plac8",		# Monocytes
+  "C1qa", "Lpl","Itgax",	# Macrophage
+ "Retnlg",	#Neutrophil
+  "Csf3r","Fcgr3", "Xcr1",	"Mgl2",		# DC
+"Ager", "Epcam","Hopx","Sftpc","Areg",                            #epithelial
+"Ptprb","Vwf","Car4","Tmem212", #endothelial
+"Col1a1","Pdgfra","Inmt","Pdgfrb","Col14a1","Mcpt8"#fibroblast
+),) + RotatedAxis()	
+
+ggsave("/picb/bigdata/project/guoxin/ingradiatecdhfd/CD2CONTENT/CD2markers.pdf", markers,width = 9, height = 7)
+
+# Save integrated data
+save(CD2_2, file = "CD2_2.Rdata")
